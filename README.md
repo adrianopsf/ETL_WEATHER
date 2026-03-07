@@ -33,17 +33,45 @@ Este projeto implementa um pipeline ETL completo para dados meteorológicos:
 3. **Carrega** em PostgreSQL com tratamento de duplicatas e controle temporal
 4. **Orquestra** todo o processo via Apache Airflow com execução paralela por cidade
 
-**Cobertura geográfica:** Todas as 26 capitais estaduais brasileiras.
+**Cobertura geográfica:** Todas as 26 capitais estaduais brasileiras (Rio Branco, Maceió, Macapá, Manaus, Salvador, Fortaleza, Brasília, Vitória, Goiânia, São Luís, Cuiabá, Campo Grande, Belo Horizonte, Belém, João Pessoa, Curitiba, Recife, Teresina, Rio de Janeiro, Natal, Porto Alegre, Porto Velho, Boa Vista, Florianópolis, São Paulo, Aracaju).
 
 ---
 
 ## 🏗️ Arquitetura
 
 ```
-OpenWeather API → Extração Paralela (26 cidades) → CSV intermediário → PostgreSQL Raw → PostgreSQL Curated
-```
+┌────────────────────────────────────────────────────────────┐
+│                  Apache Airflow DAG: weather_data           │
+│                                                            │
+│   ┌─────────┐                                             │
+│   │  hello  │                                             │
+│   └────┬────┘                                             │
+│        │                                                   │
+│   ┌────┴──────────────────────┐                           │
+│   │    Extração Paralela      │                           │
+│   ├───────────┬───────────┬───┤                           │
+│   │ download  │ download  │ download                      │
+│   │ current   │ forecast  │ historical                    │
+│   └─────┬─────┴─────┬─────┴────┬──┘                      │
+│         │           │          │                          │
+│   ┌─────▼─────┬─────▼──────┬───▼──────┐                  │
+│   │ current   │ forecast   │ history  │                   │
+│   │ →raw table│ →raw table │ →raw tbl │   (PostgreSQL)   │
+│   └─────┬─────┴─────┬──────┴──────────┘                  │
+│         │           │                                      │
+│   ┌─────▼──────┬────▼──────────┐                         │
+│   │ current    │ timeline      │                          │
+│   │ →curated   │ →curated      │   (PostgreSQL)          │
+│   └─────┬──────┴────────────────┘                        │
+│         │                                                  │
+│   ┌─────▼────────┐                                        │
+│   │   bye_bye    │                                        │
+│   └──────────────┘                                        │
+└────────────────────────────────────────────────────────────┘
 
-Orquestrado pelo Apache Airflow com 10 tarefas em pipeline sequencial/paralelo.
+Fonte: OpenWeather API → CSV intermediário → PostgreSQL
+Camadas: Raw (dados brutos) → Curated (dados transformados)
+```
 
 ---
 
@@ -51,7 +79,7 @@ Orquestrado pelo Apache Airflow com 10 tarefas em pipeline sequencial/paralelo.
 
 ```
 ETL_WEATHER/
-├── dags/
+├── dags/                           # Definições do Apache Airflow
 │   ├── scripts/
 │   │   ├── weather_data.py         # Extração da OpenWeather API
 │   │   └── queries.py              # Queries SQL de transformação
@@ -61,13 +89,18 @@ ETL_WEATHER/
 │   ├── forecast_raw.csv            # Amostra de dados de previsão
 │   ├── history_raw.csv             # Amostra de dados históricos
 │   └── .airflowignore
+│
 ├── tests/
 │   └── dags/
 │       └── test_dag_example.py     # Testes de validação das DAGs
+│
+├── .astro/                         # Configuração Astronomer
+├── .env.example                    # Template de variáveis de ambiente
 ├── Dockerfile                      # astro-runtime:11.7.0
 ├── docker-compose.yml              # PostgreSQL + Airflow local
-├── requirements.txt
-└── packages.txt
+├── requirements.txt                # Dependências Python adicionais
+├── packages.txt                    # Pacotes de sistema
+└── .gitignore
 ```
 
 ---
@@ -76,9 +109,9 @@ ETL_WEATHER/
 
 | Ferramenta | Versão | Uso |
 |------------|--------|-----|
-| Docker | 20+ | Infraestrutura local |
+| Docker     | 20+    | Infraestrutura local |
 | Docker Compose | 2+ | Orquestração de serviços |
-| Astro CLI | latest | Gerenciamento do Airflow local *(recomendado)* |
+| Astro CLI  | latest | Gerenciamento do Airflow local *(recomendado)* |
 | OpenWeather API Key | — | Chave gratuita em [openweathermap.org](https://openweathermap.org/api) |
 
 ---
@@ -102,25 +135,36 @@ cp .env.example .env
 # 4. Inicie o ambiente local
 astro dev start
 
-# 5. Acesse o Airflow em http://localhost:8080 (admin/admin)
+# 5. Acesse o Airflow
+# URL: http://localhost:8080
+# Usuário: admin | Senha: admin
 ```
 
-### Opção B — Com Docker Compose
+### Opção B — Com Docker Compose diretamente
 
 ```bash
+# 1. Clone o repositório
 git clone https://github.com/adrianopsf/ETL_WEATHER.git
 cd ETL_WEATHER
+
+# 2. Configure variáveis de ambiente
 cp .env.example .env
+
+# 3. Inicie todos os serviços
 docker compose up -d
-# Acesse http://localhost:8080
+
+# 4. Aguarde os serviços subirem (~60 segundos)
+docker compose ps
+
+# 5. Acesse o Airflow em http://localhost:8080
 ```
 
-### Executar o DAG
+### Ativar e executar o DAG
 
-1. Acesse `http://localhost:8080`
+1. Acesse o Airflow em `http://localhost:8080`
 2. Ative o DAG `weather_data` (toggle ON)
-3. Clique em **Trigger DAG**
-4. Acompanhe na aba **Graph View**
+3. Clique em **Trigger DAG** para executar manualmente
+4. Acompanhe a execução na aba **Graph View**
 
 ---
 
@@ -128,94 +172,126 @@ docker compose up -d
 
 ### DAG: `weather_data`
 
-| Tarefa | Descrição |
-|--------|-----------|
-| `hello` | Log de início do pipeline |
-| `download_current_weather_data` | Busca clima atual para 26 capitais |
-| `download_forecast_weather_data` | Busca previsão de 5 dias |
-| `download_historical_weather_data` | Busca histórico dos últimos 3 dias |
-| `current_weather_to_raw` | Carga CSV → `current_weather_raw` |
-| `forecast_weather_to_raw` | Carga CSV → `forecast_weather_raw` |
-| `history_weather_to_raw` | Carga CSV → `history_weather_raw` |
-| `current_to_curated` | Transforma → `current_weather` |
-| `timeline_to_curated` | Une forecast+history → `timeline_weather` |
-| `bye_bye` | Log de conclusão |
+| Tarefa | Tipo | Descrição |
+|--------|------|-----------|
+| `hello` | PythonOperator | Log de início do pipeline |
+| `download_current_weather_data` | PythonOperator | Busca clima atual para 26 capitais |
+| `download_forecast_weather_data` | PythonOperator | Busca previsão de 5 dias para 26 capitais |
+| `download_historical_weather_data` | PythonOperator | Busca histórico dos últimos 3 dias para 26 capitais |
+| `current_weather_to_raw` | PythonOperator | Carga do CSV atual → `current_weather_raw` |
+| `forecast_weather_to_raw` | PythonOperator | Carga do CSV de previsão → `forecast_weather_raw` |
+| `history_weather_to_raw` | PythonOperator | Carga do CSV histórico → `history_weather_raw` |
+| `current_to_curated` | PythonOperator | Transformação → `current_weather` (curada) |
+| `timeline_to_curated` | PythonOperator | União forecast+history → `timeline_weather` (curada) |
+| `bye_bye` | PythonOperator | Log de conclusão |
 
-**Configurações:** Schedule `@once`, 1 retry com delay de 5min, catchup desabilitado.
+**Configurações do DAG:**
+- Schedule: `@once` (execução única, manual ou agendável)
+- Retries: 1 tentativa com intervalo de 5 minutos
+- Catchup: desabilitado
 
 ---
 
 ## 🗃️ Esquema do Banco de Dados
 
 ### Camada Raw
-- `current_weather_raw` — dados brutos do clima atual por cidade
-- `forecast_weather_raw` — JSON com previsão por horas futuras
-- `history_weather_raw` — JSON com histórico por horas passadas
+
+#### `current_weather_raw`
+Dados brutos da API de clima atual, um registro por cidade por execução.
+
+#### `forecast_weather_raw`
+Dados brutos de previsão (JSON com array de horas futuras).
+
+#### `history_weather_raw`
+Dados brutos históricos (JSON com array de horas passadas).
 
 ### Camada Curated
 
 #### `current_weather`
-Campos: `date_local`, `timestamp_local`, `location`, `city`, `state`, `country`, `latitude`, `longitude`, `timezone`, `temperature`, `thermal_sensation`, `precipitation`, `humidity`, `cloud_cover`, `uv_radiation`, `wind_speed`, `wind_direction`, `condition`, `updatetime_utc`
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| date_local | DATE | Data local da medição |
+| timestamp_local | TIMESTAMP | Timestamp local |
+| location | TEXT | "Cidade, Estado, Brasil" |
+| city | TEXT | Nome da cidade |
+| state | TEXT | Sigla do estado |
+| country | TEXT | País |
+| latitude | NUMERIC | Latitude |
+| longitude | NUMERIC | Longitude |
+| timezone | TEXT | Fuso horário |
+| temperature | NUMERIC | Temperatura (°C) |
+| thermal_sensation | NUMERIC | Sensação térmica (°C) |
+| precipitation | NUMERIC | Precipitação (mm) |
+| humidity | NUMERIC | Umidade relativa (%) |
+| cloud_cover | NUMERIC | Cobertura de nuvens (%) |
+| uv_radiation | NUMERIC | Índice UV |
+| wind_speed | NUMERIC | Velocidade do vento (km/h) |
+| wind_direction | NUMERIC | Direção do vento (°) |
+| condition | TEXT | Descrição das condições |
+| updatetime_utc | TIMESTAMP | Timestamp da atualização |
 
 #### `timeline_weather`
-Une dados históricos e de previsão hora a hora com campo `type` (`'historical'` ou `'forecast'`).
+Combina dados históricos e de previsão hora a hora.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| location | TEXT | Localização |
+| city / state / country | TEXT | Dados geográficos |
+| latitude / longitude | NUMERIC | Coordenadas |
+| type | TEXT | `'historical'` ou `'forecast'` |
+| time_reference | TEXT | Referência temporal |
+| date | DATE | Data da medição |
+| hour | TEXT | Hora da medição |
+| temperature | NUMERIC | Temperatura (°C) |
+| humidity | NUMERIC | Umidade (%) |
+| wind_speed | NUMERIC | Velocidade do vento |
+| condition | TEXT | Condição do tempo |
+| *...demais métricas* | NUMERIC | Dados meteorológicos horários |
 
 ---
 
 ## 🔍 Avaliação End-to-End
 
+> Análise da viabilidade de execução completa do pipeline — atualizada após correções.
+
 ### ✅ O que funciona
 
 | Componente | Status | Observação |
 |-----------|--------|-----------|
-| Dockerfile (Astronomer Runtime) | ✅ | Imagem funcional com dependências incluídas |
-| Docker Compose | ✅ | PostgreSQL + Airflow configurados corretamente |
-| `weather_data.py` | ✅ | Extração e geração de CSV funcionando |
-| `queries.py` | ✅ | Transformações SQL com JSON parsing correto |
-| Estrutura do DAG | ✅ | Paralelismo correto entre tarefas |
-| Testes de DAG | ✅ | Validações básicas presentes |
+| Dockerfile (Astronomer Runtime) | ✅ | Imagem funcional, todas as dependências do Airflow incluídas |
+| Docker Compose (infra) | ✅ | PostgreSQL + Airflow configurados corretamente |
+| `weather_data.py` (extração) | ✅ | API key lida de variável de ambiente `OPENWEATHER_API_KEY` |
+| `weather-etl.py` (DAG) | ✅ | Credenciais DB via env vars + helper `get_db_conn()` |
+| `queries.py` (transformações SQL) | ✅ | Queries de curated layer bem estruturadas com JSON parsing |
+| Estrutura do DAG | ✅ | Paralelismo correto entre tarefas de extração |
+| `.env.example` | ✅ | Template com todas as variáveis necessárias |
+| `test_dag_example.py` | ✅ | Testes básicos de validação de DAG presentes |
 
-### ⚠️ Pontos de atenção
+### ⚠️ Pontos de atenção (restantes)
 
 | Problema | Severidade | Recomendação |
 |---------|-----------|-------------|
-| **API Key hardcoded** em `weather_data.py` | 🔴 Alta | Usar `os.getenv("OPENWEATHER_API_KEY")` |
-| **Credenciais DB hardcoded** em `weather-etl.py` | 🔴 Alta | Usar Airflow Connections ou variáveis de ambiente |
-| **Bug: connection string sem f-string** | 🔴 Alta | Ver correção abaixo — falha em runtime |
-| **Sem `.env.example`** | 🟡 Média | Criar template de variáveis |
-| **Schedule `@once`** | 🟢 Baixa | Considerar `@daily` para operação contínua |
-
-### 🐛 Bug crítico — connection string
-
-```python
-# ❌ ATUAL — variáveis não são interpoladas (bug de runtime)
-conn = psycopg2.connect("dbname={dbname} user={user} host= {host} password={password}")
-
-# ✅ CORRETO
-import os
-conn = psycopg2.connect(
-    dbname=os.getenv("DB_NAME", "postgres"),
-    user=os.getenv("DB_USER", "postgres"),
-    host=os.getenv("DB_HOST", "localhost"),
-    password=os.getenv("DB_PASSWORD", "postgres")
-)
-```
+| **Testes insuficientes** | 🟡 Média | Adicionar testes de integração para validar a extração de dados |
+| **Schedule `@once`** | 🟢 Baixa | Considerar `@daily` ou cron para operação contínua |
+| **CSV armazenado no dags/** | 🟢 Baixa | Salvar em `/tmp` ou pasta de dados dedicada em vez do diretório de DAGs |
 
 ---
 
 ## 🛠️ Melhorias Futuras
 
-- [ ] Corrigir bug da connection string e remover credenciais hardcoded
-- [ ] Criar `.env.example` com todas as variáveis necessárias
 - [ ] Configurar rotina diária (`schedule_interval='@daily'`)
-- [ ] Adicionar idempotência nas tabelas Raw
-- [ ] Implementar monitoramento com alertas por e-mail
-- [ ] Criar dashboard no Metabase ou Grafana
-- [ ] Adicionar testes de qualidade de dados
+- [ ] Adicionar monitoramento com alertas por e-mail em caso de falha
+- [ ] Implementar idempotência nas tabelas Raw (evitar duplicatas por re-execução)
+- [ ] Adicionar testes de qualidade de dados (Great Expectations ou dbt tests)
+- [ ] Criar dashboard no Metabase ou Grafana para visualização
+- [ ] Expandir para mais cidades ou países
+- [ ] Armazenar dados em formato Parquet para análise histórica
 
 ---
 
-## 📊 Capitais Monitoradas (26)
+## 📊 Dados de Exemplo
+
+**Capitais monitoradas (26 no total):**
 
 | Região | Capitais |
 |--------|---------|
@@ -231,14 +307,15 @@ conn = psycopg2.connect(
 
 1. Fork o repositório
 2. Crie uma branch: `git checkout -b feature/minha-feature`
-3. Commit: `git commit -m 'feat: minha feature'`
-4. Push e abra um Pull Request
+3. Commit: `git commit -m 'feat: adiciona minha feature'`
+4. Push: `git push origin feature/minha-feature`
+5. Abra um Pull Request
 
 ---
 
 ## 📄 Licença
 
-MIT License — veja [LICENSE](LICENSE) para detalhes.
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para detalhes.
 
 ---
 
