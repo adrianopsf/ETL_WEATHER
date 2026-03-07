@@ -1,17 +1,28 @@
 import requests
 import datetime
+import os
 import pandas as pd
 import uuid
 
-api_key = "63ebf5c020bfddd664a2edf616e61988"
+# --- Configuração da API Key via variável de ambiente ---
+api_key = os.getenv("OPENWEATHER_API_KEY", "")
+if not api_key:
+    raise ValueError(
+        "OPENWEATHER_API_KEY environment variable not set. "
+        "Please copy .env.example to .env and add your key from "
+        "https://openweathermap.org/api"
+    )
+
 base_url = "http://api.openweathermap.org/data/2.5/"
 save_path = ""
+
 
 def get_current_weather(api_key, location):
     current_weather_url = base_url + "weather"
     params = {"appid": api_key, "q": location, "units": "metric", "lang": "pt_br"}
     response = requests.get(current_weather_url, params=params)
     return response.json()
+
 
 def get_history_weather(api_key, location, date):
     current_weather = get_current_weather(api_key, location)
@@ -20,11 +31,11 @@ def get_history_weather(api_key, location, date):
         lon = current_weather['coord']['lon']
     else:
         return {'error': 'Não foi possível obter a coordenada da cidade'}
-    
     history_weather_url = base_url + "timemachine"
     params = {"appid": api_key, "lat": lat, "lon": lon, "dt": date, "units": "metric", "lang": "pt_br"}
     response = requests.get(history_weather_url, params=params)
     return response.json()
+
 
 def get_forecast_weather(api_key, location):
     forecast_weather_url = base_url + "forecast"
@@ -32,21 +43,40 @@ def get_forecast_weather(api_key, location):
     response = requests.get(forecast_weather_url, params=params)
     return response.json()
 
+
 def get_cities_to_weather():
-    brasilian_states   = [ 'Acre', 'Alagoas', 'Amapá', 'Amazonas', 'Bahia', 'Ceará', 'Espírito Santo', 'Goiás', 'Maranhão', 'Mato Grosso', 'Mato Grosso do Sul', 'Minas Gerais', 'Pará', 'Paraíba', 'Paraná', 'Pernambuco', 'Piauí', 'Rio de Janeiro', 'Rio Grande do Norte', 'Rio Grande do Sul', 'Rondônia', 'Roraima', 'Santa Catarina', 'São Paulo', 'Sergipe', 'Tocantins' ]
-    brasilian_capitals = [ 'Rio Branco', 'Maceió', 'Macapá', 'Manaus', 'Salvador', 'Fortaleza',  'Vitória', 'Goiânia', 'São Luís', 'Cuiabá', 'Campo Grande', 'Belo Horizonte', 'Belém', 'João Pessoa', 'Curitiba', 'Recife', 'Teresina', 'Rio de Janeiro', 'Natal', 'Porto Alegre', 'Porto Velho', 'Boa Vista', 'Florianópolis', 'São Paulo', 'Aracaju', 'Palmas' ]
-    cities = [ x + ", " + y + ', Brazil' for x, y in zip(brasilian_capitals, brasilian_states) ]
-    cities_unaccented = [ x.replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ã', 'a').replace('õ', 'o').replace('ç', 'c') for x in cities]
-    cities_upper = [ x.upper() for x in cities_unaccented ]
-    cities = cities_upper
-    return cities
+    brasilian_states = [
+        'Acre', 'Alagoas', 'Amapá', 'Amazonas', 'Bahia', 'Ceará',
+        'Espírito Santo', 'Goiás', 'Maranhão', 'Mato Grosso', 'Mato Grosso do Sul',
+        'Minas Gerais', 'Pará', 'Paraíba', 'Paraná', 'Pernambuco', 'Piauí',
+        'Rio de Janeiro', 'Rio Grande do Norte', 'Rio Grande do Sul', 'Rondônia',
+        'Roraima', 'Santa Catarina', 'São Paulo', 'Sergipe', 'Tocantins'
+    ]
+    brasilian_capitals = [
+        'Rio Branco', 'Maceió', 'Macapá', 'Manaus', 'Salvador', 'Fortaleza',
+        'Vitória', 'Goiânia', 'São Luís', 'Cuiabá', 'Campo Grande', 'Belo Horizonte',
+        'Belém', 'João Pessoa', 'Curitiba', 'Recife', 'Teresina', 'Rio de Janeiro',
+        'Natal', 'Porto Alegre', 'Porto Velho', 'Boa Vista', 'Florianópolis',
+        'São Paulo', 'Aracaju', 'Palmas'
+    ]
+    cities = [x + ", " + y + ', Brazil' for x, y in zip(brasilian_capitals, brasilian_states)]
+    cities_unaccented = [
+        x.replace('á', 'a').replace('é', 'e').replace('í', 'i')
+         .replace('ó', 'o').replace('ú', 'u').replace('ã', 'a')
+         .replace('õ', 'o').replace('ç', 'c')
+        for x in cities
+    ]
+    cities_upper = [x.upper() for x in cities_unaccented]
+    return cities_upper
+
 
 def get_last_3days():
     today = datetime.datetime.now()
-    last_3days = [ (today - datetime.timedelta(days=x)).timestamp() for x in range(3) ]
+    last_3days = [(today - datetime.timedelta(days=x)).timestamp() for x in range(3)]
     return last_3days
 
-def create_current_weather_file(cities, save_path = save_path):
+
+def create_current_weather_file(cities, save_path=save_path):
     current_df = pd.DataFrame()
     infos = ['query']
     for a in cities:
@@ -60,19 +90,25 @@ def create_current_weather_file(cities, save_path = save_path):
                         info = f"{key}_{sub_key}"
                         if info not in infos:
                             infos.append(info)
-                        current_df = pd.concat([current_df, pd.DataFrame({'record_id': [record_id], 'type': [key], 'info': [info], 'value': [sub_value]})])
+                        current_df = pd.concat([current_df, pd.DataFrame({
+                            'record_id': [record_id], 'type': [key], 'info': [info], 'value': [sub_value]
+                        })])
                 else:
                     if key not in infos:
                         infos.append(key)
-                    current_df = pd.concat([current_df, pd.DataFrame({'record_id': [record_id], 'type': [key], 'info': [key], 'value': [value]})])
+                    current_df = pd.concat([current_df, pd.DataFrame({
+                        'record_id': [record_id], 'type': [key], 'info': [key], 'value': [value]
+                    })])
             query_info = {'record_id': [record_id], 'type': 'location', 'info': 'query', 'value': a}
             current_df = pd.concat([current_df, pd.DataFrame(query_info)])
-
-    current_data_raw = current_df.pivot_table(index='record_id', columns='info', values='value', aggfunc='first').reset_index()[infos]
+    current_data_raw = current_df.pivot_table(
+        index='record_id', columns='info', values='value', aggfunc='first'
+    ).reset_index()[infos]
     current_data_raw.to_csv(save_path + 'current_raw.csv', index=False)
-    current_data_raw.head()
+    return current_data_raw
 
-def create_forecast_weather_file(cities, save_path = save_path):
+
+def create_forecast_weather_file(cities, save_path=save_path):
     current_df = pd.DataFrame()
     infos = ['query']
     for a in cities:
@@ -87,18 +123,27 @@ def create_forecast_weather_file(cities, save_path = save_path):
                             info = f"{key}_{sub_key}"
                             if info not in infos:
                                 infos.append(info)
-                            current_df = pd.concat([current_df, pd.DataFrame({'record_id': [record_id], 'type': [key], 'info': [info], 'value': [sub_value]})])
+                            current_df = pd.concat([current_df, pd.DataFrame({
+                                'record_id': [record_id], 'type': [key], 'info': [info], 'value': [sub_value]
+                            })])
                     else:
                         if key not in infos:
                             infos.append(key)
-                        current_df = pd.concat([current_df, pd.DataFrame({'record_id': [record_id], 'type': [key], 'info': [key], 'value': [value]})])
+                        current_df = pd.concat([current_df, pd.DataFrame({
+                            'record_id': [record_id], 'type': [key], 'info': [key], 'value': [value]
+                        })])
             query_info = {'record_id': [record_id], 'type': 'location', 'info': 'query', 'value': a}
             current_df = pd.concat([current_df, pd.DataFrame(query_info)])
-        
-    forecast_raw = current_df.pivot_table(index='record_id', columns='info', values='value', aggfunc='first').reset_index()[infos]
+    forecast_raw = current_df.pivot_table(
+        index='record_id', columns='info', values='value', aggfunc='first'
+    ).reset_index()[infos]
     forecast_raw.to_csv(save_path + 'forecast_raw.csv', index=False)
+    return forecast_raw
 
-def create_historical_weather_file(cities, historic_weather_days = get_last_3days(), save_path = save_path):
+
+def create_historical_weather_file(cities, historic_weather_days=None, save_path=save_path):
+    if historic_weather_days is None:
+        historic_weather_days = get_last_3days()
     current_df = pd.DataFrame()
     infos = ['query']
     days = historic_weather_days
@@ -115,16 +160,23 @@ def create_historical_weather_file(cities, historic_weather_days = get_last_3day
                                 info = f"{key}_{sub_key}"
                                 if info not in infos:
                                     infos.append(info)
-                                current_df = pd.concat([current_df, pd.DataFrame({'record_id': [record_id], 'type': [key], 'info': [info], 'value': [sub_value]})])
+                                current_df = pd.concat([current_df, pd.DataFrame({
+                                    'record_id': [record_id], 'type': [key], 'info': [info], 'value': [sub_value]
+                                })])
                         else:
                             if key not in infos:
                                 infos.append(key)
-                            current_df = pd.concat([current_df, pd.DataFrame({'record_id': [record_id], 'type': [key], 'info': [key], 'value': [value]})])
-            query_info = {'record_id': [record_id], 'type': 'location', 'info': 'query', 'value': a}
-            current_df = pd.concat([current_df, pd.DataFrame(query_info)])
-            
-    history_raw = current_df.pivot_table(index='record_id', columns='info', values='value', aggfunc='first').reset_index()
+                            current_df = pd.concat([current_df, pd.DataFrame({
+                                'record_id': [record_id], 'type': [key], 'info': [key], 'value': [value]
+                            })])
+                query_info = {'record_id': [record_id], 'type': 'location', 'info': 'query', 'value': a}
+                current_df = pd.concat([current_df, pd.DataFrame(query_info)])
+    history_raw = current_df.pivot_table(
+        index='record_id', columns='info', values='value', aggfunc='first'
+    ).reset_index()
     history_raw.to_csv(save_path + 'history_raw.csv', index=False)
+    return history_raw
+
 
 if __name__ == "__main__":
     cities = get_cities_to_weather()
